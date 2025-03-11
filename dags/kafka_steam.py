@@ -5,7 +5,7 @@ import json
 import requests
 from kafka import KafkaProducer
 import time
-API_key = 'Your_API_KEY' # your api key
+API_key = 'YOUR_API_KEY' # your api key
 # lat = 13.75 # latitude # Bangkok
 # lon = 100.5167 # longitude # Bangkok
 bangkok_districts = {
@@ -63,6 +63,39 @@ def get_data(lat, lon):
     res = res.json()
     return res
 
+api_url_sensor = "https://api.airgradient.com/public/api/v1/locations/measures/current?token=ba29ff46-468c-4a4e-a1bc-7f308aace0b2" 
+
+def call_api(api_url_sensor):
+    try:
+        response = requests.get(api_url_sensor)
+        response.raise_for_status() # raise an exception for bad status codes.
+        data = response.json()
+        beautified_json = json.dumps(data, indent=4)
+        print(beautified_json)
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data: {e}")
+    except json.JSONDecodeError as e:
+        print(f"Error decoding JSON: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        
+    return data
+        
+        
+def format_data_sensor(data):
+    import time
+    data = data[0]
+    formatted_data = {}
+    formatted_data['locationName'] = data['locationName']
+    formatted_data['timestamp'] = time.time() 
+    formatted_data['pm02'] = data['pm02']
+    formatted_data['atmp'] = data['atmp']
+    formatted_data['rhum'] = data['rhum']
+    formatted_data['rco2'] = data['rco2']   
+    
+    return formatted_data
+    
 def format_data(res,name): # format the data to be sent to kafka
     data = {}
     data['district'] = name
@@ -82,48 +115,53 @@ def format_data(res,name): # format the data to be sent to kafka
 def steam_data():
     import logging
     # print(json.dumps(data, indent=4))
-    producer = KafkaProducer(bootstrap_servers=['broker:29092'], max_block_ms=5000) # connect to kafka
-    #send data to kafka every 3mins
-    curr_time = time.time()
+    producer = KafkaProducer(bootstrap_servers=['broker1:29092'], max_block_ms=5000) # connect to kafka
+    producer2 = KafkaProducer(bootstrap_servers=['broker2:29093'], max_block_ms=5000) # connect to kafka
     while True:
+        try:
+            res = call_api(api_url_sensor)
+            data = format_data_sensor(res)
+            producer2.send('airpollution_from_sensor', json.dumps(data).encode('utf-8')) # utf-8 means 8-bit Unicode Transformation Format
+            logging.info('Data sent to kafka')
+        except Exception as e:
+            logging.error(f"Error in sending data to kafka due to {e}")
+            continue
+        
         for index, row in bangkok_districts.items():
             name = index
             lat = row['latitude']
             lon = row['longitude']
-            if time.time() > curr_time + 100: # 3 minutes
-                break
             try:
                 res = get_data(lat, lon)
                 data = format_data(res, name)
-                producer.send('airpollution', json.dumps(data).encode('utf-8')) # utf-8 means 8-bit Unicode Transformation Format
+                producer.send('airpollution_from_API', json.dumps(data).encode('utf-8')) # utf-8 means 8-bit Unicode Transformation Format
                 logging.info('Data sent to kafka')
                 # time.sleep(10)  # Sleep for 10 seconds
             except Exception as e:
                 logging.error(f"Error in sending data to kafka due to {e}")
                 continue
-        time.sleep(30)  # Sleep for 30 seconds
-            
-        # if time.time() > curr_time + 100:  # 3 minutes
-        #     break
-        # try:
-        #     res = get_data()
-        #     data = format_data(res)
-        #     producer.send('airpollution', json.dumps(data).encode('utf-8')) # utf-8 means 8-bit Unicode Transformation Format
-        #     logging.info('Data sent to kafka')
-        #     time.sleep(10)  # Sleep for 10 seconds
-        # except Exception as e:
-        #     logging.error(e)
-        #     continue
-            
+        time.sleep(10)  # Sleep for 30 seconds
     
-            
-    
+# def steam_sensor_data():
+#     import logging
+#     producer = KafkaProducer(bootstrap_servers=['broker2:29093'], max_block_ms=5000) # connect to kafka
+#     while True:
+#         try:
+#             res = call_api(api_url_sensor)
+#             data = format_data_sensor(res)
+#             producer.send('airpollution_from_sensor', json.dumps(data).encode('utf-8')) # utf-8 means 8-bit Unicode Transformation Format
+#             logging.info('Data sent to kafka')
+#         except Exception as e:
+#             logging.error(f"Error in sending data to kafka due to {e}")
+#             continue
+#         time.sleep(10)  # Sleep for 10 seconds
+
 with DAG('airpollution',
          default_args=default_arg,
          schedule_interval='@daily', # run the DAG daily
          catchup=False) as dag:
     
     steaming_task = PythonOperator(
-        task_id='stream_data_from_api',
-        python_callable=steam_data
-    )
+        task_id='streaming_data',
+        python_callable=steam_data)
+    
