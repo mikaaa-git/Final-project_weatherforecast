@@ -117,7 +117,10 @@ def steam_data():
     # print(json.dumps(data, indent=4))
     producer = KafkaProducer(bootstrap_servers=['broker1:29092'], max_block_ms=5000) # connect to kafka
     producer2 = KafkaProducer(bootstrap_servers=['broker2:29093'], max_block_ms=5000) # connect to kafka
+    curr_time = time.time()
     while True:
+        if time.time() - curr_time > 86400: # 86400 seconds in 24 hours
+            break
         try:
             res = call_api(api_url_sensor)
             data = format_data_sensor(res)
