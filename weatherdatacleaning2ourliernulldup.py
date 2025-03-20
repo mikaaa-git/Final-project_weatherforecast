@@ -8,9 +8,20 @@ Original file is located at
 """
 
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, mean, stddev, count, when
+from pyspark.sql.functions import col, mean, stddev, count, when,udf
+from pyspark.sql.types import StringType
 import matplotlib.pyplot as plt
 import pandas as pd
+
+from datetime import datetime
+from pyspark.sql.functions import udf, col
+from pyspark.sql.types import StringType, IntegerType
+
+def format_timestamp(timestamp_int):
+    timestamp_obj = datetime.fromtimestamp(timestamp_int)
+    formatted_timestamp = timestamp_obj.strftime('%Y-%m-%d %I:%M:%S %p')
+    return formatted_timestamp
+
 
 # Initialize Spark session
 spark = SparkSession.builder.appName("DataCleaning").getOrCreate()
@@ -18,6 +29,9 @@ spark = SparkSession.builder.appName("DataCleaning").getOrCreate()
 # Load CSV file
 data_path = "weather_data.csv"
 df = spark.read.csv(data_path, header=True, inferSchema=True)
+
+format_timestamp_udf = udf(format_timestamp, StringType())
+df = df.withColumn('FormattedDateTime', format_timestamp_udf(col('timestamp').cast(IntegerType())))
 
 # Initial counts
 initial_count = df.count()
@@ -102,7 +116,7 @@ final_count = df.count()
 final_nulls = df.select([count(when(col(c).isNull(), 1)).alias(c) for c in df.columns]).collect()
 
 # Order by District before saving
-df = df.orderBy("District")
+df = df.orderBy("District", "FormattedDateTime")
 
 # Save cleaned data to CSV
 output_path = "cleaned_weather_data.csv"
